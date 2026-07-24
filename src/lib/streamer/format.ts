@@ -46,13 +46,13 @@ export function stalenessSev(ch: Channel, s: number | undefined): Sev {
 export function sevToBg(sev: Sev): string {
   switch (sev) {
     case "ok":
-      return "bg-[--status-up]";
+      return "bg-[var(--status-up)]";
     case "warn":
-      return "bg-[--status-degraded]";
+      return "bg-[var(--status-degraded)]";
     case "crit":
-      return "bg-[--status-down]";
+      return "bg-[var(--status-down)]";
     case "off":
-      return "bg-[--surface-3]";
+      return "bg-[var(--surface-3)]";
   }
 }
 

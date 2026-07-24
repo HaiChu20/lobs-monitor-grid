@@ -42,7 +42,9 @@ export async function getIncidents(windowDays: number): Promise<IncidentsRespons
   return r.json();
 }
 
-export async function getAllSymbols() {
+export type SymbolFleetRow = ReturnType<typeof mockAllSymbols>[number];
+
+export async function getAllSymbols(): Promise<SymbolFleetRow[]> {
   if (USE_MOCK) return fake(mockAllSymbols());
   // Real endpoint would be added here.
   const r = await fetch(`${API_BASE}/api/symbols`);

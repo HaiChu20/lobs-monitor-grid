@@ -1,0 +1,60 @@
+# Dependencies
+node_modules
+
+# Build / framework output
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack/**
+.nitro
+.cache
+.vite
+*.tsbuildinfo
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# Local env / secrets (never commit real tokens — this repo syncs to Lovable)
+.env
+.env.*
+!.env.example
+
+# Persisted dashboard state (dev). In Rahti this lives on a PVC, not in git.
+.data/
+
+# Local-only / OS / editor
+*.local
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+AGENTS.md 
+BACKEND.md
+DEPLOY.md
+
+# Coverage / test junk
+coverage
+.nyc_output
+tmp
+temp
+
+*.pem
+*.key

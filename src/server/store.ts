@@ -130,8 +130,26 @@ function inferChannels(snap: IngestServiceSnapshot): Channel[] {
 }
 
 // ---- status derivation ------------------------------------------------------
-/** Freshness-only verdict (never DOWN — DOWN comes from active/dead-man). */
-function freshnessStatus(snap: IngestServiceSnapshot): { status: Status; stale: number } {
+// Health is judged at the CONNECTION + HOST level, not per-symbol: sparse channels
+// (e.g. forceOrder) make "seconds since last message" a bad alarm. A calm market
+// is UP, not DEGRADED.
+const BUDGET_WARN_FRAC = 0.8; // connect-open budget usage that signals reconnect pressure
+const DISK_WARN_PCT = 10; // free-disk % floor
+const RECONNECT_STORM_1H = 20; // reconnects/hour that signal a flapping conn (needs stats op)
+
+/** Alive-but-degraded check (never DOWN — DOWN comes from active/dead-man). */
+function healthStatus(snap: IngestServiceSnapshot): Status {
+  const b = snap.budgets?.connect_open;
+  if (b && b.limit > 0 && b.used / b.limit > BUDGET_WARN_FRAC) return "DEGRADED";
+  if (snap.disk_free_pct != null && snap.disk_free_pct < DISK_WARN_PCT) return "DEGRADED";
+  // Populated once the streamer `stats` op ships; 0 until then.
+  const reconnects1h = (snap.connections ?? []).reduce((a, c) => a + (c.reconnects_1h ?? 0), 0);
+  if (reconnects1h > RECONNECT_STORM_1H) return "DEGRADED";
+  return "UP";
+}
+
+/** Count of (symbol,channel) past their warn threshold — INFO only now (not health). */
+function countStale(snap: IngestServiceSnapshot): number {
   let stale = 0;
   for (const chans of Object.values(snap.symbols ?? {})) {
     for (const [ch, v] of Object.entries(chans) as [Channel, number | null][]) {
@@ -140,7 +158,7 @@ function freshnessStatus(snap: IngestServiceSnapshot): { status: Status; stale: 
       if (t && v > t.warn) stale++;
     }
   }
-  return { status: stale > 0 ? "DEGRADED" : "UP", stale };
+  return stale;
 }
 
 /** Recompute a service's status at time `now`, recording transitions + incidents. */
@@ -154,7 +172,7 @@ function evaluate(s: ServiceState, now: number): void {
     status = "DOWN";
     cause = "process_down";
   } else {
-    status = freshnessStatus(s.lastSnapshot).status;
+    status = healthStatus(s.lastSnapshot);
   }
 
   if (status === s.status) return; // no change
@@ -241,7 +259,7 @@ function sparkline24h(s: ServiceState, now: number): number[] {
 
 function staleStreams(snap: IngestServiceSnapshot | null): number {
   if (!snap) return 0;
-  return freshnessStatus(snap).stale;
+  return countStale(snap); // informational only; no longer affects status
 }
 
 function nextRolloverSeconds(now: number): number {

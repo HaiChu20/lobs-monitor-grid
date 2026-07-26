@@ -46,9 +46,8 @@ export function ServiceCard({ svc }: { svc: ServiceSummary }) {
       </div>
 
       <div className="mt-4">
-        <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
-          <span>24h uptime</span>
-          <span>{svc.stale_streams} stale</span>
+        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground mb-1.5">
+          24h uptime
         </div>
         <div className="flex h-6 items-end gap-[2px]">
           {svc.uptime_sparkline_24h.map((v, i) => (

@@ -8,11 +8,12 @@
 // In-memory means history is LOST on server restart/redeploy. That's fine for v1
 // (Phase 5 swaps in SQLite on a PVC). The Discord alerts remain the durable backstop.
 
-import type { IngestPayload, IngestServiceSnapshot } from "@/lib/streamer/ingest";
+import type { IngestPayload, IngestServiceSnapshot, RawConnStat } from "@/lib/streamer/ingest";
 import {
   CHANNEL_THRESHOLDS,
   type Budgets,
   type Channel,
+  type ChannelStatus,
   type ConnectionRow,
   type Incident,
   type IncidentsResponse,
@@ -46,6 +47,16 @@ export interface ServiceState {
   statusLog: Array<{ t: number; status: Status }>;
   incidents: Incident[];
   firstSeen: number;
+  /** last-seen cumulative reconnect count per connection name (to detect ticks up) */
+  connCounters: Record<string, number>;
+  /** timestamped reconnect ("drop") events per channel — powers the status lines */
+  dropEvents: DropEvent[];
+}
+
+interface DropEvent {
+  channel: Channel;
+  conn: string;
+  t: number;
 }
 
 interface Store {
@@ -72,6 +83,8 @@ function createStore(): Store {
     svc.lastIngestAt = now;
     svc.statusLog ??= [];
     svc.incidents ??= [];
+    svc.connCounters ??= {};
+    svc.dropEvents ??= [];
     s.services.set(svc.id, svc);
   }
   return s;
@@ -108,6 +121,8 @@ export function ingest(payload: IngestPayload): void {
         statusLog: [],
         incidents: [],
         firstSeen: now,
+        connCounters: {},
+        dropEvents: [],
       };
       store.services.set(snap.id, s);
     }
@@ -116,6 +131,7 @@ export function ingest(payload: IngestPayload): void {
     if (snap.channels?.length) s.channels = snap.channels;
     s.lastSnapshot = snap;
     s.lastIngestAt = now;
+    recordDrops(s, snap, now); // turn reconnect-counter ticks into timestamped drop events
     evaluate(s, now); // fold this reading into status/incidents immediately
   }
   persist(); // durably save latest snapshots + any transitions (debounced)
@@ -129,6 +145,42 @@ function inferChannels(snap: IngestServiceSnapshot): Channel[] {
   return [...set];
 }
 
+// ---- reconnect (drop) tracking ---------------------------------------------
+/** Detect reconnect-counter ticks per connection → timestamped drop events. On
+ *  first sight of a connection we adopt its cumulative count (no backfill), and a
+ *  counter reset (streamer restart → count drops) logs nothing. */
+function recordDrops(s: ServiceState, snap: IngestServiceSnapshot, now: number): void {
+  for (const c of snap.conn_stats ?? []) {
+    const prev = s.connCounters[c.name];
+    if (prev === undefined) {
+      s.connCounters[c.name] = c.reconnects;
+      continue;
+    }
+    for (let i = prev; i < c.reconnects; i++) {
+      s.dropEvents.push({ channel: c.channel, conn: c.name, t: now });
+    }
+    s.connCounters[c.name] = c.reconnects;
+  }
+  const cutoff = now - RETENTION_MS;
+  if (s.dropEvents.length && s.dropEvents[0].t < cutoff) {
+    s.dropEvents = s.dropEvents.filter((e) => e.t >= cutoff);
+  }
+}
+
+function dropsInWindow(s: ServiceState, now: number, windowMs: number, channel?: Channel): number {
+  const from = now - windowMs;
+  let n = 0;
+  for (const e of s.dropEvents) if (e.t >= from && (!channel || e.channel === channel)) n++;
+  return n;
+}
+
+function connDropsInWindow(s: ServiceState, now: number, windowMs: number, conn: string): number {
+  const from = now - windowMs;
+  let n = 0;
+  for (const e of s.dropEvents) if (e.t >= from && e.conn === conn) n++;
+  return n;
+}
+
 // ---- status derivation ------------------------------------------------------
 // Health is judged at the CONNECTION + HOST level, not per-symbol: sparse channels
 // (e.g. forceOrder) make "seconds since last message" a bad alarm. A calm market
@@ -138,13 +190,11 @@ const DISK_WARN_PCT = 10; // free-disk % floor
 const RECONNECT_STORM_1H = 20; // reconnects/hour that signal a flapping conn (needs stats op)
 
 /** Alive-but-degraded check (never DOWN — DOWN comes from active/dead-man). */
-function healthStatus(snap: IngestServiceSnapshot): Status {
+function healthStatus(snap: IngestServiceSnapshot, reconnects1h: number): Status {
   const b = snap.budgets?.connect_open;
   if (b && b.limit > 0 && b.used / b.limit > BUDGET_WARN_FRAC) return "DEGRADED";
   if (snap.disk_free_pct != null && snap.disk_free_pct < DISK_WARN_PCT) return "DEGRADED";
-  // Populated once the streamer `stats` op ships; 0 until then.
-  const reconnects1h = (snap.connections ?? []).reduce((a, c) => a + (c.reconnects_1h ?? 0), 0);
-  if (reconnects1h > RECONNECT_STORM_1H) return "DEGRADED";
+  if (reconnects1h > RECONNECT_STORM_1H) return "DEGRADED"; // flapping connections
   return "UP";
 }
 
@@ -172,7 +222,7 @@ function evaluate(s: ServiceState, now: number): void {
     status = "DOWN";
     cause = "process_down";
   } else {
-    status = healthStatus(s.lastSnapshot);
+    status = healthStatus(s.lastSnapshot, dropsInWindow(s, now, 3600_000));
   }
 
   if (status === s.status) return; // no change
@@ -290,6 +340,61 @@ const EMPTY_BUDGETS: Budgets = {
   rest_weight: { used: 0, limit: 1200 },
 };
 
+// ---- connection + status-line derivation ------------------------------------
+const STATUS_BINS = 48; // 48 half-hour bins over 24h for the status lines
+
+function connState(state: string): Status {
+  return state === "connected" ? "UP" : state === "reconnecting" ? "DOWN" : "DEGRADED";
+}
+
+/** The Connections table: one row per sharded socket, with reconnect rates from
+ *  the drop-event history. */
+function deriveConnections(s: ServiceState, now: number): ConnectionRow[] {
+  return (s.lastSnapshot?.conn_stats ?? []).map((c) => ({
+    name: c.name,
+    channel: c.channel,
+    symbols: c.symbols,
+    state: connState(c.state),
+    reconnects_1h: connDropsInWindow(s, now, 3600_000, c.name),
+    reconnects_24h: connDropsInWindow(s, now, 24 * 3600_000, c.name),
+    corrupt: c.corrupt,
+    last_connect: c.last_connect_ns ? new Date(c.last_connect_ns / 1e6).toISOString() : new Date(now).toISOString(),
+    skew_ms: 0, // not measured yet
+  }));
+}
+
+/** The status lines: one per channel, a 24h grid of clean/drop bins. */
+function deriveChannelStatus(s: ServiceState, now: number): ChannelStatus[] {
+  const byChannel = new Map<Channel, RawConnStat[]>();
+  for (const c of s.lastSnapshot?.conn_stats ?? []) {
+    const arr = byChannel.get(c.channel) ?? [];
+    arr.push(c);
+    byChannel.set(c.channel, arr);
+  }
+  const channels = s.channels.length ? s.channels : [...byChannel.keys()];
+  const binMs = (24 * 3600_000) / STATUS_BINS;
+  const start = now - 24 * 3600_000;
+  return channels.map((channel) => {
+    const conns = byChannel.get(channel) ?? [];
+    const anyDown = conns.some((c) => c.state === "reconnecting");
+    const allDown = conns.length > 0 && conns.every((c) => c.state !== "connected");
+    const buckets = Array.from({ length: STATUS_BINS }, (_, i) => {
+      const lo = start + i * binMs;
+      const hi = lo + binMs;
+      for (const e of s.dropEvents) if (e.channel === channel && e.t >= lo && e.t < hi) return 0;
+      return 1;
+    });
+    if (anyDown) buckets[STATUS_BINS - 1] = 0; // reflect a live outage in the latest bin
+    return {
+      channel,
+      state: allDown ? "DOWN" : anyDown ? "DEGRADED" : "UP",
+      conns: conns.length,
+      reconnects_24h: dropsInWindow(s, now, 24 * 3600_000, channel),
+      buckets,
+    };
+  });
+}
+
 // ---- endpoint builders (shapes come straight from types.ts) -----------------
 export function buildOverview(): OverviewResponse {
   const now = Date.now();
@@ -301,7 +406,7 @@ export function buildOverview(): OverviewResponse {
     host: s.host,
     uptime_pct_24h: uptimePct(s, now, 24 * 3600_000),
     uptime_s: uptimeSeconds(s, now),
-    reconnects_1h: sumReconnects1h(s), // 0 in v1 (needs stats op)
+    reconnects_1h: dropsInWindow(s, now, 3600_000), // real, from drop events
     disk_free_pct: s.lastSnapshot?.disk_free_pct ?? 0,
     stale_streams: staleStreams(s.lastSnapshot),
     uptime_sparkline_24h: sparkline24h(s, now),
@@ -342,9 +447,10 @@ export function buildServiceDetail(id: string): ServiceDetail | null {
     next_rollover_s: nextRolloverSeconds(now),
     channels: s.channels,
     symbols: symbolRows(s.lastSnapshot),
-    connections: (s.lastSnapshot?.connections ?? []) as ConnectionRow[], // [] in v1
+    connections: deriveConnections(s, now),
+    channel_status: deriveChannelStatus(s, now),
     budgets: { ...EMPTY_BUDGETS, ...(s.lastSnapshot?.budgets ?? {}) },
-    series: { msgs_per_s_1h: [], reconnects_24h: [], skew_ms_1h: [] }, // filled in v2
+    series: { msgs_per_s_1h: [], reconnects_24h: [], skew_ms_1h: [] }, // filled later
   };
 }
 

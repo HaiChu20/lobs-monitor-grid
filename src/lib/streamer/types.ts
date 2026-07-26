@@ -67,6 +67,15 @@ export interface Series {
   skew_ms_1h: [number, number][];
 }
 
+/** One status-page "line": a channel's drop history over the last 24h. */
+export interface ChannelStatus {
+  channel: Channel;
+  state: Status; // UP if all its sockets are connected right now
+  conns: number; // how many sharded sockets carry this channel
+  reconnects_24h: number;
+  buckets: number[]; // 48 bins over 24h; 1 = clean, 0 = a drop/reconnect in that bin
+}
+
 export interface ServiceDetail {
   id: string;
   name: string;
@@ -78,6 +87,7 @@ export interface ServiceDetail {
   channels: Channel[];
   symbols: SymbolRow[];
   connections: ConnectionRow[];
+  channel_status: ChannelStatus[];
   budgets: Budgets;
   series: Series;
 }

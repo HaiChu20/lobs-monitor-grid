@@ -8,6 +8,20 @@
 
 import type { Budgets, Channel, ConnectionRow } from "./types";
 
+/** Raw per-connection counters from the streamer `stats` op (cumulative since
+ *  start). The dashboard diffs these over time to derive reconnect rates + the
+ *  per-channel status timeline. */
+export interface RawConnStat {
+  name: string; // e.g. "futures:depth-1"
+  channel: Channel;
+  symbols: number;
+  state: string; // "connected" | "reconnecting" | "init"
+  connects: number;
+  reconnects: number; // cumulative, failure-driven (excludes midnight rotation)
+  corrupt: number;
+  last_connect_ns: number;
+}
+
 /** One service (e.g. binance-futures) as seen on the VM at one instant. */
 export interface IngestServiceSnapshot {
   /** stable id, e.g. "binance-futures" — must match across pushes */
@@ -29,8 +43,10 @@ export interface IngestServiceSnapshot {
    */
   symbols: Record<string, Partial<Record<Channel, number | null>>>;
 
-  // ---- v2 (optional; needs the streamer `stats` op — ignored in v1) ----
-  /** per-connection detail (reconnects, corrupt, skew, …) */
+  // ---- per-connection reliability (from the streamer `stats` op) ----
+  /** raw cumulative counters per socket — the dashboard derives rates + timeline */
+  conn_stats?: RawConnStat[];
+  /** (legacy/unused) pre-derived rows */
   connections?: ConnectionRow[];
   /** per-symbol message rate, e.g. { "BTCUSDT": 320 } */
   msgs_per_s?: Record<string, number>;

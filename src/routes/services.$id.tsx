@@ -65,7 +65,49 @@ function ServiceDetailPage() {
                 <HeaderStat label="Connections" value={String(q.data.connections.length)} />
               </div>
 
-              {/* Hero: per-connection reliability — how often each socket dies. */}
+              {/* Status-page style: one line per channel, red where a socket dropped. */}
+              <Panel
+                title="Channel status · 24h"
+                right={
+                  <span className="inline-flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+                    <span className="inline-flex items-center gap-1">
+                      <i className="h-2 w-2 rounded-sm" style={{ background: "var(--status-up)" }} /> ok
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <i className="h-2 w-2 rounded-sm" style={{ background: "var(--status-down)" }} /> drop
+                    </span>
+                  </span>
+                }
+              >
+                {q.data.channel_status.length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border p-6 text-center text-xs font-mono text-muted-foreground">
+                    Per-channel drop history appears here once the streamer <code>stats</code> op is deployed.
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {q.data.channel_status.map((cs) => (
+                      <div key={cs.channel} className="flex items-center gap-3">
+                        <div className="w-24 shrink-0 font-mono text-xs">{cs.channel}</div>
+                        <div className="flex h-6 min-w-0 flex-1 items-stretch gap-[2px]">
+                          {cs.buckets.map((b, i) => (
+                            <div
+                              key={i}
+                              className="flex-1 rounded-[1px]"
+                              style={{ background: b ? "var(--status-up)" : "var(--status-down)", opacity: b ? 0.8 : 1 }}
+                              title={`${binLabel(i)} · ${b ? "ok" : "drop"}`}
+                            />
+                          ))}
+                        </div>
+                        <div className="w-24 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+                          {cs.conns} conn · {cs.reconnects_24h} drop{cs.reconnects_24h === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              {/* Per-connection reliability — how often each socket dies. */}
               <Panel
                 title="Connections"
                 right={
@@ -187,6 +229,15 @@ function channelLiveness(channels: Channel[], symbols: SymbolRow[]) {
 function fmtAge(seconds: number | null): string {
   if (seconds == null) return "—";
   return seconds < 60 ? `${seconds.toFixed(1)}s ago` : `${fmtDuration(Math.round(seconds))} ago`;
+}
+
+/** Label for status-line bin i (48 half-hour bins over 24h; bin 47 = now). */
+function binLabel(i: number): string {
+  const minsAgo = (48 - 1 - i) * 30;
+  if (minsAgo <= 0) return "now";
+  const h = Math.floor(minsAgo / 60);
+  const m = minsAgo % 60;
+  return h ? `${h}h${m ? ` ${m}m` : ""} ago` : `${m}m ago`;
 }
 
 function HeaderStat({ label, value }: { label: string; value: string }) {

@@ -51,14 +51,20 @@ export interface ConnectionRow {
   state: Status;
   reconnects_1h: number;
   reconnects_24h: number;
-  corrupt: number;
   last_connect: string;
   skew_ms: number;
 }
 
-export interface Budgets {
-  connect_open: { used: number; limit: number; window_s: number };
-  rest_weight: { used: number; limit: number };
+/** One rate-limit budget/limit, exchange-specific. Rendered as a gauge when
+ *  `limit` is set (e.g. connect-open, REST weight), else as a plain value with
+ *  `unit` (e.g. Kraken's L3 subscribe backlog, which is a pacer not a quota). */
+export interface BudgetItem {
+  key: string; // "connect_open" | "rest_weight" | "l3_subscribe"
+  label: string;
+  used: number;
+  limit?: number;
+  window_s?: number;
+  unit?: string;
 }
 
 export interface Series {
@@ -88,7 +94,7 @@ export interface ServiceDetail {
   symbols: SymbolRow[];
   connections: ConnectionRow[];
   channel_status: ChannelStatus[];
-  budgets: Budgets;
+  budgets: BudgetItem[];
   series: Series;
 }
 

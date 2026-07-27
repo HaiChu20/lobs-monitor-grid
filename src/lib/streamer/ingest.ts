@@ -6,7 +6,7 @@
 // server — see src/server/store.ts. Keeping this shape close to the raw `list`
 // output means the real agent (Phase 2) stays a ~15-line script.
 
-import type { Budgets, Channel, ConnectionRow } from "./types";
+import type { BudgetItem, Channel, ConnectionRow } from "./types";
 
 /** Raw per-connection counters from the streamer `stats` op (cumulative since
  *  start). The dashboard diffs these over time to derive reconnect rates + the
@@ -18,7 +18,6 @@ export interface RawConnStat {
   state: string; // "connected" | "reconnecting" | "init"
   connects: number;
   reconnects: number; // cumulative, failure-driven (excludes midnight rotation)
-  corrupt: number;
   last_connect_ns: number;
 }
 
@@ -34,8 +33,8 @@ export interface IngestServiceSnapshot {
   disk_free_pct?: number;
   /** channels this service runs — becomes the heatmap columns */
   channels?: Channel[];
-  /** connection-open / REST-weight budgets (from binance-connects.json) */
-  budgets?: Partial<Budgets>;
+  /** exchange-specific rate-limit budgets (connect-open, REST weight, L3 pacer …) */
+  budgets?: BudgetItem[];
   /**
    * Straight from the control-server `list` op:
    *   { "BTCUSDT": { "depth": 0.2, "bookTicker": 0.1, "snapshot": 12.0 }, ... }

@@ -132,7 +132,6 @@ function ServiceDetailPage() {
                           <Th right>Symbols</Th>
                           <Th>State</Th>
                           <Th right>Reconn 1h/24h</Th>
-                          <Th right>Corrupt</Th>
                           <Th right>Skew ms</Th>
                           <Th>Last connect</Th>
                         </tr>
@@ -149,9 +148,6 @@ function ServiceDetailPage() {
                                 {c.reconnects_1h}
                               </span>
                               <span className="text-muted-foreground"> / {c.reconnects_24h}</span>
-                            </Td>
-                            <Td right mono>
-                              <span className={c.corrupt > 0 ? "text-[--status-degraded]" : ""}>{c.corrupt}</span>
                             </Td>
                             <Td right mono>
                               <span className={c.skew_ms > 150 ? "text-[--status-degraded]" : ""}>{c.skew_ms}</span>
@@ -190,19 +186,31 @@ function ServiceDetailPage() {
                 </div>
               </Panel>
 
-              <div className="grid gap-4 lg:grid-cols-2">
-                <Gauge
-                  label="Connection open budget"
-                  sublabel={`${q.data.budgets.connect_open.window_s / 60}m window`}
-                  used={q.data.budgets.connect_open.used}
-                  limit={q.data.budgets.connect_open.limit}
-                />
-                <Gauge
-                  label="REST weight budget"
-                  used={q.data.budgets.rest_weight.used}
-                  limit={q.data.budgets.rest_weight.limit}
-                />
-              </div>
+              {q.data.budgets.length > 0 && (
+                <div className="grid gap-4 lg:grid-cols-3">
+                  {q.data.budgets.map((b) =>
+                    b.limit ? (
+                      <Gauge
+                        key={b.key}
+                        label={b.label}
+                        sublabel={b.window_s ? `${Math.round(b.window_s / 60)}m window` : undefined}
+                        used={b.used}
+                        limit={b.limit}
+                      />
+                    ) : (
+                      <div key={b.key} className="rounded-lg border border-border bg-[--surface-1] p-4">
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+                          {b.label}
+                        </div>
+                        <div className="mt-2 font-mono text-2xl font-semibold tabular-nums">
+                          {b.used}
+                          {b.unit ?? ""}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
             </>
           )}
         </StateBlock>

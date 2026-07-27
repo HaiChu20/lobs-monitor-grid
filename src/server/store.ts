@@ -11,7 +11,6 @@
 import type { IngestPayload, IngestServiceSnapshot, RawConnStat } from "@/lib/streamer/ingest";
 import {
   CHANNEL_THRESHOLDS,
-  type Budgets,
   type Channel,
   type ChannelStatus,
   type ConnectionRow,
@@ -191,8 +190,8 @@ const RECONNECT_STORM_1H = 20; // reconnects/hour that signal a flapping conn (n
 
 /** Alive-but-degraded check (never DOWN — DOWN comes from active/dead-man). */
 function healthStatus(snap: IngestServiceSnapshot, reconnects1h: number): Status {
-  const b = snap.budgets?.connect_open;
-  if (b && b.limit > 0 && b.used / b.limit > BUDGET_WARN_FRAC) return "DEGRADED";
+  const b = snap.budgets?.find((x) => x.key === "connect_open");
+  if (b && b.limit && b.used / b.limit > BUDGET_WARN_FRAC) return "DEGRADED";
   if (snap.disk_free_pct != null && snap.disk_free_pct < DISK_WARN_PCT) return "DEGRADED";
   if (reconnects1h > RECONNECT_STORM_1H) return "DEGRADED"; // flapping connections
   return "UP";
@@ -335,11 +334,6 @@ function symbolRows(snap: IngestServiceSnapshot | null): SymbolRow[] {
   });
 }
 
-const EMPTY_BUDGETS: Budgets = {
-  connect_open: { used: 0, limit: 250, window_s: 300 },
-  rest_weight: { used: 0, limit: 1200 },
-};
-
 // ---- connection + status-line derivation ------------------------------------
 const STATUS_BINS = 48; // 48 half-hour bins over 24h for the status lines
 
@@ -357,7 +351,6 @@ function deriveConnections(s: ServiceState, now: number): ConnectionRow[] {
     state: connState(c.state),
     reconnects_1h: connDropsInWindow(s, now, 3600_000, c.name),
     reconnects_24h: connDropsInWindow(s, now, 24 * 3600_000, c.name),
-    corrupt: c.corrupt,
     last_connect: c.last_connect_ns ? new Date(c.last_connect_ns / 1e6).toISOString() : new Date(now).toISOString(),
     skew_ms: 0, // not measured yet
   }));
@@ -449,7 +442,7 @@ export function buildServiceDetail(id: string): ServiceDetail | null {
     symbols: symbolRows(s.lastSnapshot),
     connections: deriveConnections(s, now),
     channel_status: deriveChannelStatus(s, now),
-    budgets: { ...EMPTY_BUDGETS, ...(s.lastSnapshot?.budgets ?? {}) },
+    budgets: s.lastSnapshot?.budgets ?? [],
     series: { msgs_per_s_1h: [], reconnects_24h: [], skew_ms_1h: [] }, // filled later
   };
 }

@@ -5,6 +5,12 @@
 import type { IngestPayload } from "@/lib/streamer/ingest";
 import { buildIncidents, buildOverview, buildServiceDetail, buildSymbols, ingest } from "./store";
 
+/** Map a ?window=1h|6h|24h|7d query param to milliseconds (default 24h). */
+function windowMs(url: URL): number {
+  const map: Record<string, number> = { "1h": 3600_000, "6h": 6 * 3600_000, "24h": 24 * 3600_000, "7d": 7 * 24 * 3600_000 };
+  return map[url.searchParams.get("window") ?? "24h"] ?? 24 * 3600_000;
+}
+
 const json = (data: unknown, status = 200): Response =>
   new Response(JSON.stringify(data), {
     status,
@@ -49,7 +55,7 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
   }
 
   // ---- read endpoints the frontend polls ------------------------------------
-  if (path === "/api/overview") return json(buildOverview());
+  if (path === "/api/overview") return json(buildOverview(windowMs(url)));
 
   if (path === "/api/incidents") {
     const w = url.searchParams.get("window") ?? "7d";
@@ -61,7 +67,7 @@ export async function handleApiRequest(request: Request): Promise<Response | nul
 
   if (path.startsWith("/api/services/")) {
     const id = decodeURIComponent(path.slice("/api/services/".length));
-    const detail = buildServiceDetail(id);
+    const detail = buildServiceDetail(id, windowMs(url));
     return detail ? json(detail) : json({ error: "service not found" }, 404);
   }
 

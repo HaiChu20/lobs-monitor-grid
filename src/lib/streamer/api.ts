@@ -13,12 +13,22 @@ async function getJSON<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-export function getOverview(): Promise<OverviewResponse> {
-  return getJSON<OverviewResponse>("/api/overview");
+export type Timeframe = "1h" | "6h" | "24h" | "7d";
+
+/** Timeframe options for the channel-status toggle. `ms` drives bin labels. */
+export const TIMEFRAMES: { value: Timeframe; ms: number }[] = [
+  { value: "1h", ms: 3600_000 },
+  { value: "6h", ms: 6 * 3600_000 },
+  { value: "24h", ms: 24 * 3600_000 },
+  { value: "7d", ms: 7 * 24 * 3600_000 },
+];
+
+export function getOverview(window: Timeframe = "24h"): Promise<OverviewResponse> {
+  return getJSON<OverviewResponse>(`/api/overview?window=${window}`);
 }
 
-export function getServiceDetail(id: string): Promise<ServiceDetail> {
-  return getJSON<ServiceDetail>(`/api/services/${encodeURIComponent(id)}`);
+export function getServiceDetail(id: string, window: Timeframe = "24h"): Promise<ServiceDetail> {
+  return getJSON<ServiceDetail>(`/api/services/${encodeURIComponent(id)}?window=${window}`);
 }
 
 export function getIncidents(windowDays: number): Promise<IncidentsResponse> {

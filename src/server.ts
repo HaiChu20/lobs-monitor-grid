@@ -3,6 +3,7 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { handleApiRequest } from "./server/handler";
+import { basicAuthGate } from "./server/auth";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -48,6 +49,10 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // Optional username/password gate for humans (skips /healthz + /ingest).
+      const authResponse = basicAuthGate(request);
+      if (authResponse) return authResponse;
+
       // Our backend API (/ingest + /api/*). Returns null for everything else,
       // so the normal website renderer handles all page requests below.
       const apiResponse = await handleApiRequest(request);

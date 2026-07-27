@@ -1,14 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { ArrowLeft, Server } from "lucide-react";
 import { AppShell } from "@/components/streamer/AppShell";
 import { StatusPill } from "@/components/streamer/StatusPill";
 import { Panel, StateBlock } from "@/components/streamer/Panel";
 import { Gauge } from "@/components/streamer/Gauge";
 import { TimeAgo } from "@/components/streamer/TimeAgo";
-import { getServiceDetail, POLL_MS } from "@/lib/streamer/api";
+import { ChannelLines, TimeframeToggle } from "@/components/streamer/ChannelLines";
+import { getServiceDetail, POLL_MS, TIMEFRAMES, type Timeframe } from "@/lib/streamer/api";
 import { fmtDuration, fmtNumber } from "@/lib/streamer/format";
 import type { Channel, SymbolRow } from "@/lib/streamer/types";
+
+const TF_VALUES = TIMEFRAMES.map((t) => t.value);
 
 export const Route = createFileRoute("/services/$id")({
   head: ({ params }) => ({
@@ -22,9 +26,11 @@ export const Route = createFileRoute("/services/$id")({
 
 function ServiceDetailPage() {
   const { id } = Route.useParams();
+  const [tf, setTf] = useState<Timeframe>("24h");
+  const tfMs = TIMEFRAMES.find((t) => t.value === tf)!.ms;
   const q = useQuery({
-    queryKey: ["service", id],
-    queryFn: () => getServiceDetail(id),
+    queryKey: ["service", id, tf],
+    queryFn: () => getServiceDetail(id, tf),
     refetchInterval: POLL_MS,
   });
 
@@ -68,42 +74,15 @@ function ServiceDetailPage() {
 
               {/* Status-page style: one line per channel, red where a socket dropped. */}
               <Panel
-                title="Channel status · 24h"
-                right={
-                  <span className="inline-flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
-                    <span className="inline-flex items-center gap-1">
-                      <i className="h-2 w-2 rounded-sm" style={{ background: "var(--status-up)" }} /> ok
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <i className="h-2 w-2 rounded-sm" style={{ background: "var(--status-down)" }} /> drop
-                    </span>
-                  </span>
-                }
+                title={`Channel status · ${tf}`}
+                right={<TimeframeToggle options={TF_VALUES} value={tf} onChange={setTf} />}
               >
                 {q.data.channel_status.length === 0 ? (
                   <div className="rounded-md border border-dashed border-border p-6 text-center text-xs font-mono text-muted-foreground">
                     Per-channel drop history appears here once the streamer <code>stats</code> op is deployed.
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
-                    {q.data.channel_status.map((cs) => (
-                      <div key={cs.channel} className="flex items-center gap-3">
-                        <div className="w-24 shrink-0 font-mono text-xs">{cs.channel}</div>
-                        <div className="flex h-6 min-w-0 flex-1 items-stretch gap-[2px]">
-                          {cs.buckets.map((b, i) => (
-                            <div key={i} className="group/bin relative flex-1 rounded-[1px]" style={{ background: b ? "var(--status-up)" : "var(--status-down)", opacity: b ? 0.8 : 1 }}>
-                              <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded border border-border bg-[--surface-3] px-1.5 py-0.5 text-[10px] font-mono text-foreground shadow-lg group-hover/bin:block">
-                                {binLabel(i)} · {b ? "ok" : "drop"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="w-24 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
-                          {cs.conns} conn · {cs.reconnects_24h} drop{cs.reconnects_24h === 1 ? "" : "s"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <ChannelLines channels={q.data.channel_status} timeframeMs={tfMs} />
                 )}
               </Panel>
 
@@ -235,15 +214,6 @@ function channelLiveness(channels: Channel[], symbols: SymbolRow[]) {
 function fmtAge(seconds: number | null): string {
   if (seconds == null) return "—";
   return seconds < 60 ? `${seconds.toFixed(1)}s ago` : `${fmtDuration(Math.round(seconds))} ago`;
-}
-
-/** Label for status-line bin i (48 half-hour bins over 24h; bin 47 = now). */
-function binLabel(i: number): string {
-  const minsAgo = (48 - 1 - i) * 30;
-  if (minsAgo <= 0) return "now";
-  const h = Math.floor(minsAgo / 60);
-  const m = minsAgo % 60;
-  return h ? `${h}h${m ? ` ${m}m` : ""} ago` : `${m}m ago`;
 }
 
 function HeaderStat({ label, value }: { label: string; value: string }) {

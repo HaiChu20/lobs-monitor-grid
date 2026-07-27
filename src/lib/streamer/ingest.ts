@@ -20,6 +20,7 @@ export interface RawConnStat {
   reconnects: number; // cumulative, failure-driven (excludes midnight rotation)
   msgs: number; // cumulative frames received (dashboard diffs → msgs/s)
   last_connect_ns: number;
+  last_error?: string; // message of the most recent connection error
 }
 
 /** One service (e.g. binance-futures) as seen on the VM at one instant. */

@@ -7,7 +7,7 @@ import { POLL_MS } from "@/lib/streamer/api";
 
 const nav = [
   { to: "/", label: "Overview", icon: LayoutGrid, exact: true },
-  { to: "/incidents", label: "Incidents", icon: AlertTriangle, exact: false },
+  { to: "/incidents", label: "Reliability", icon: AlertTriangle, exact: false },
   { to: "/symbols", label: "Symbols", icon: Coins, exact: false },
 ];
 

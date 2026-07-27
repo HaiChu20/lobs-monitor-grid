@@ -54,9 +54,9 @@ function IncidentsPage() {
       <div className="mx-auto max-w-[1600px] p-4 sm:p-6 space-y-6">
         <div className="flex items-baseline justify-between flex-wrap gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Incidents</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Reliability</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Outages, degradations, and their causes across the fleet.
+              Connection drops (and the rare outage) across the fleet.
             </p>
           </div>
           <div className="flex items-center gap-1 rounded-md border border-border bg-[--surface-1] p-0.5">
@@ -82,27 +82,20 @@ function IncidentsPage() {
                 </div>
                 <div className="mt-2 flex items-baseline justify-between gap-2">
                   <div>
-                    <div
-                      className="font-mono text-xl font-semibold tabular-nums"
-                      style={{
-                        color:
-                          s && s.uptime_pct >= 99.9
-                            ? "var(--status-up)"
-                            : s && s.uptime_pct >= 99
-                              ? "var(--status-degraded)"
-                              : "var(--status-down)",
-                      }}
-                    >
-                      {s ? `${s.uptime_pct.toFixed(2)}%` : "—"}
+                    <div className="font-mono text-2xl font-semibold tabular-nums text-foreground">
+                      {s ? s.drops : "—"}
                     </div>
-                    <div className="text-[10px] font-mono text-muted-foreground">uptime</div>
+                    <div className="text-[10px] font-mono text-muted-foreground">drops · {win === 1 ? "24h" : `${win}d`}</div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right space-y-0.5">
                     <div className="font-mono text-xs tabular-nums text-muted-foreground">
-                      MTBF {s ? fmtDuration(s.mtbf_s) : "—"}
+                      MTBD {s && s.drops > 0 ? fmtDuration(s.mtbd_s) : "—"}
                     </div>
-                    <div className="font-mono text-xs tabular-nums text-muted-foreground">
-                      MTTR {s ? fmtDuration(s.mttr_s) : "—"}
+                    <div className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {s ? `${(s.drops / (win * 24)).toFixed(1)}/hr` : "—"}
+                    </div>
+                    <div className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                      {s && s.incidents > 0 ? `${s.incidents} outages` : "0 outages"}
                     </div>
                   </div>
                 </div>
@@ -148,7 +141,7 @@ function IncidentsPage() {
                         {e.kind === "incident" ? fmtDuration(e.duration_s ?? 0) : "—"}
                       </td>
                       <td className="px-3 py-2 font-mono text-muted-foreground">
-                        {e.kind === "drop" ? `ws_drop · ${e.channel}` : e.cause}
+                        {e.kind === "drop" ? (e.conn ? `[${e.conn}] ` : "") + (e.error ?? `ws drop · ${e.channel}`) : e.cause}
                       </td>
                       <td className="px-3 py-2">
                         {e.kind === "drop" ? (

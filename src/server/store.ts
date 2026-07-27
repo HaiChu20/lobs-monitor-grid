@@ -62,6 +62,7 @@ interface DropEvent {
   channel: Channel;
   conn: string;
   t: number;
+  error?: string; // the connection error that caused this drop
 }
 
 interface Store {
@@ -169,7 +170,7 @@ function recordDrops(s: ServiceState, snap: IngestServiceSnapshot, now: number):
       continue;
     }
     for (let i = prev; i < c.reconnects; i++) {
-      s.dropEvents.push({ channel: c.channel, conn: c.name, t: now });
+      s.dropEvents.push({ channel: c.channel, conn: c.name, t: now, error: c.last_error || undefined });
     }
     s.connCounters[c.name] = c.reconnects;
   }
@@ -388,8 +389,9 @@ function deriveConnections(s: ServiceState, now: number): ConnectionRow[] {
   }));
 }
 
-/** The status lines: one per channel, a 24h grid of clean/drop bins. */
-function deriveChannelStatus(s: ServiceState, now: number): ChannelStatus[] {
+/** The status lines: one per channel, `windowMs` split into 48 bins, each bin
+ *  holding the NUMBER of drops in it (0 = clean). Client colours by count. */
+function deriveChannelStatus(s: ServiceState, now: number, windowMs: number): ChannelStatus[] {
   const byChannel = new Map<Channel, RawConnStat[]>();
   for (const c of s.lastSnapshot?.conn_stats ?? []) {
     const arr = byChannel.get(c.channel) ?? [];
@@ -397,19 +399,19 @@ function deriveChannelStatus(s: ServiceState, now: number): ChannelStatus[] {
     byChannel.set(c.channel, arr);
   }
   const channels = s.channels.length ? s.channels : [...byChannel.keys()];
-  const binMs = (24 * 3600_000) / STATUS_BINS;
-  const start = now - 24 * 3600_000;
+  const binMs = windowMs / STATUS_BINS;
+  const start = now - windowMs;
   return channels.map((channel) => {
     const conns = byChannel.get(channel) ?? [];
     const anyDown = conns.some((c) => c.state === "reconnecting");
     const allDown = conns.length > 0 && conns.every((c) => c.state !== "connected");
-    const buckets = Array.from({ length: STATUS_BINS }, (_, i) => {
-      const lo = start + i * binMs;
-      const hi = lo + binMs;
-      for (const e of s.dropEvents) if (e.channel === channel && e.t >= lo && e.t < hi) return 0;
-      return 1;
-    });
-    if (anyDown) buckets[STATUS_BINS - 1] = 0; // reflect a live outage in the latest bin
+    const buckets = new Array<number>(STATUS_BINS).fill(0);
+    for (const e of s.dropEvents) {
+      if (e.channel !== channel || e.t < start) continue;
+      const idx = Math.min(STATUS_BINS - 1, Math.floor((e.t - start) / binMs));
+      if (idx >= 0) buckets[idx]++;
+    }
+    if (anyDown) buckets[STATUS_BINS - 1] = Math.max(buckets[STATUS_BINS - 1], 1); // live outage
     return {
       channel,
       state: allDown ? "DOWN" : anyDown ? "DEGRADED" : "UP",
@@ -421,7 +423,7 @@ function deriveChannelStatus(s: ServiceState, now: number): ChannelStatus[] {
 }
 
 // ---- endpoint builders (shapes come straight from types.ts) -----------------
-export function buildOverview(): OverviewResponse {
+export function buildOverview(windowMs = 24 * 3600_000): OverviewResponse {
   const now = Date.now();
   evaluateAll(now);
   const services: ServiceSummary[] = [...store.services.values()].map((s) => ({
@@ -432,10 +434,12 @@ export function buildOverview(): OverviewResponse {
     uptime_pct_24h: uptimePct(s, now, 24 * 3600_000),
     uptime_s: uptimeSeconds(s, now),
     reconnects_1h: dropsInWindow(s, now, 3600_000), // real, from drop events
+    drops_24h: dropsInWindow(s, now, 24 * 3600_000),
     msgs_per_s: s.msgsPerS,
     disk_free_pct: s.lastSnapshot?.disk_free_pct ?? 0,
     stale_streams: staleStreams(s.lastSnapshot),
     uptime_sparkline_24h: sparkline24h(s, now),
+    channel_status: deriveChannelStatus(s, now, windowMs),
   }));
   services.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -458,7 +462,7 @@ export function buildOverview(): OverviewResponse {
   };
 }
 
-export function buildServiceDetail(id: string): ServiceDetail | null {
+export function buildServiceDetail(id: string, windowMs = 24 * 3600_000): ServiceDetail | null {
   const s = store.services.get(id);
   if (!s) return null;
   const now = Date.now();
@@ -475,7 +479,7 @@ export function buildServiceDetail(id: string): ServiceDetail | null {
     channels: s.channels,
     symbols: symbolRows(s.lastSnapshot),
     connections: deriveConnections(s, now),
-    channel_status: deriveChannelStatus(s, now),
+    channel_status: deriveChannelStatus(s, now, windowMs),
     budgets: s.lastSnapshot?.budgets ?? [],
     series: { msgs_per_s_1h: [], reconnects_24h: [], skew_ms_1h: [] }, // filled later
   };
@@ -497,10 +501,14 @@ export function buildIncidents(windowDays: number): IncidentsResponse {
 
     const count = svcIncidents.length;
     const totalDown = downSecondsInWindow(s, now, windowMs);
+    const dropCount = dropsInWindow(s, now, windowMs);
     stats[s.id] = {
       uptime_pct: uptimePct(s, now, windowMs),
-      mtbf_s: count > 0 ? Math.floor(windowMs / 1000 / count) : Math.floor(windowMs / 1000),
+      incidents: count,
+      mtbf_s: count > 0 ? Math.floor(windowMs / 1000 / count) : 0,
       mttr_s: count > 0 ? Math.floor(totalDown / count) : 0,
+      drops: dropCount,
+      mtbd_s: dropCount > 0 ? Math.floor(windowMs / 1000 / dropCount) : 0,
     };
   }
   incidents.sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
@@ -530,6 +538,7 @@ export function buildIncidents(windowDays: number): IncidentsResponse {
         cause: "ws_drop",
         channel: d.channel,
         conn: d.conn,
+        error: d.error,
       });
     }
   }

@@ -27,10 +27,12 @@ export interface ServiceSummary {
   uptime_pct_24h: number;
   uptime_s: number;
   reconnects_1h: number;
+  drops_24h: number;
   msgs_per_s: number;
   disk_free_pct: number;
   stale_streams: number;
   uptime_sparkline_24h: number[]; // 48 bins, 1 up / 0 down
+  channel_status: ChannelStatus[]; // per-channel drop lines, shown on the landing page
 }
 
 export interface OverviewResponse {
@@ -73,13 +75,14 @@ export interface Series {
   skew_ms_1h: [number, number][];
 }
 
-/** One status-page "line": a channel's drop history over the last 24h. */
+/** One status-page "line": a channel's drop history, bucketed over the selected
+ *  timeframe. Each bin holds the NUMBER of drops in it (0 = clean). */
 export interface ChannelStatus {
   channel: Channel;
   state: Status; // UP if all its sockets are connected right now
   conns: number; // how many sharded sockets carry this channel
   reconnects_24h: number;
-  buckets: number[]; // 48 bins over 24h; 1 = clean, 0 = a drop/reconnect in that bin
+  buckets: number[]; // 48 bins over the requested window; value = drop count in that bin
 }
 
 export interface ServiceDetail {
@@ -110,8 +113,11 @@ export interface Incident {
 
 export interface IncidentStats {
   uptime_pct: number;
+  incidents: number; // outage count in the window ('—' in the UI when 0)
   mtbf_s: number;
   mttr_s: number;
+  drops: number; // connection-drop count in the window
+  mtbd_s: number; // mean time between drops (window ÷ drop count)
 }
 
 /** A unified activity entry: either a service outage (incident) or a single
@@ -126,6 +132,7 @@ export interface FleetEvent {
   resolved?: boolean; // incident only
   channel?: string; // drop only
   conn?: string; // drop only
+  error?: string; // drop only — the full WS error message
 }
 
 export interface IncidentsResponse {

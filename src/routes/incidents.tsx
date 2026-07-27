@@ -36,7 +36,7 @@ function IncidentsPage() {
   });
 
   const causes = useMemo(
-    () => Array.from(new Set(q.data?.incidents.map((i) => i.cause) ?? [])),
+    () => Array.from(new Set(q.data?.events.map((e) => e.cause) ?? [])),
     [q.data],
   );
 
@@ -44,8 +44,8 @@ function IncidentsPage() {
   const serviceIds = useMemo(() => Object.keys(q.data?.stats ?? {}).sort(), [q.data]);
 
   const filtered = useMemo(() => {
-    return (q.data?.incidents ?? []).filter(
-      (i) => (!svcFilter || i.service === svcFilter) && (!causeFilter || i.cause === causeFilter),
+    return (q.data?.events ?? []).filter(
+      (e) => (!svcFilter || e.service === svcFilter) && (!causeFilter || e.cause === causeFilter),
     );
   }, [q.data, svcFilter, causeFilter]);
 
@@ -112,7 +112,7 @@ function IncidentsPage() {
         </div>
 
         <Panel
-          title={`${filtered.length} incidents`}
+          title={`${filtered.length} events`}
           right={
             <div className="flex items-center gap-2">
               <FilterSelect value={svcFilter} onChange={setSvcFilter} options={serviceIds} placeholder="All services" />
@@ -138,18 +138,26 @@ function IncidentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((i) => (
-                    <tr key={i.id} className="border-b border-border hover:bg-[--surface-2]/60">
-                      <td className="px-3 py-2 font-mono">{i.service}</td>
+                  {filtered.map((e) => (
+                    <tr key={e.id} className="border-b border-border hover:bg-[--surface-2]/60">
+                      <td className="px-3 py-2 font-mono">{e.service}</td>
                       <td className="px-3 py-2">
-                        <TimeAgo iso={i.started} className="text-muted-foreground" />
+                        <TimeAgo iso={e.t} className="text-muted-foreground" />
                       </td>
                       <td className="px-3 py-2 text-right font-mono tabular-nums">
-                        {fmtDuration(i.duration_s)}
+                        {e.kind === "incident" ? fmtDuration(e.duration_s ?? 0) : "—"}
                       </td>
-                      <td className="px-3 py-2 font-mono text-muted-foreground">{i.cause}</td>
+                      <td className="px-3 py-2 font-mono text-muted-foreground">
+                        {e.kind === "drop" ? `ws_drop · ${e.channel}` : e.cause}
+                      </td>
                       <td className="px-3 py-2">
-                        <StatusPill status={i.resolved ? "UP" : "DOWN"} size="sm" />
+                        {e.kind === "drop" ? (
+                          <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono uppercase bg-[--status-degraded]/15 text-[--status-degraded]">
+                            drop
+                          </span>
+                        ) : (
+                          <StatusPill status={e.resolved ? "UP" : "DOWN"} size="sm" />
+                        )}
                       </td>
                     </tr>
                   ))}

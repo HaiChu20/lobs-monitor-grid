@@ -16,7 +16,7 @@ export const Route = createFileRoute("/symbols")({
   component: SymbolsPage,
 });
 
-type SortKey = "symbol" | "service" | "channels" | "worst" | "rate";
+type SortKey = "symbol" | "service" | "channels" | "worst";
 
 function SymbolsPage() {
   const q = useQuery({
@@ -44,8 +44,7 @@ function SymbolsPage() {
       if (k === "symbol") (av = a.symbol), (bv = b.symbol);
       else if (k === "service") (av = a.service), (bv = b.service);
       else if (k === "channels") (av = a.channels_active), (bv = b.channels_active);
-      else if (k === "worst") (av = a.worst_staleness), (bv = b.worst_staleness);
-      else (av = a.msgs_per_s), (bv = b.msgs_per_s);
+      else (av = a.worst_staleness), (bv = b.worst_staleness);
       if (av < bv) return -dir;
       if (av > bv) return dir;
       return 0;
@@ -93,7 +92,6 @@ function SymbolsPage() {
                     <SortTh label="Service" onClick={() => flip("service")} />
                     <SortTh label="Channels" right onClick={() => flip("channels")} />
                     <SortTh label="Worst stale (s)" right onClick={() => flip("worst")} />
-                    <SortTh label="Msgs/s" right onClick={() => flip("rate")} />
                     <th className="text-left px-3 py-2">Files</th>
                   </tr>
                 </thead>
@@ -128,9 +126,6 @@ function SymbolsPage() {
                         }}
                       >
                         {r.worst_staleness.toFixed(1)}
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-mono tabular-nums">
-                        {r.msgs_per_s}
                       </td>
                       <td className="px-3 py-1.5">
                         {r.producing_files ? (

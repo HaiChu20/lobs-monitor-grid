@@ -27,6 +27,7 @@ export interface ServiceSummary {
   uptime_pct_24h: number;
   uptime_s: number;
   reconnects_1h: number;
+  msgs_per_s: number;
   disk_free_pct: number;
   stale_streams: number;
   uptime_sparkline_24h: number[]; // 48 bins, 1 up / 0 down
@@ -40,7 +41,6 @@ export interface OverviewResponse {
 export interface SymbolRow {
   symbol: string;
   staleness_s: Partial<Record<Channel, number>>;
-  msgs_per_s: number;
   producing_files: boolean;
 }
 
@@ -51,8 +51,8 @@ export interface ConnectionRow {
   state: Status;
   reconnects_1h: number;
   reconnects_24h: number;
+  msgs_per_s: number;
   last_connect: string;
-  skew_ms: number;
 }
 
 /** One rate-limit budget/limit, exchange-specific. Rendered as a gauge when
@@ -90,6 +90,7 @@ export interface ServiceDetail {
   uptime_s: number;
   restarts_24h: number;
   next_rollover_s: number;
+  msgs_per_s: number;
   channels: Channel[];
   symbols: SymbolRow[];
   connections: ConnectionRow[];
@@ -113,8 +114,23 @@ export interface IncidentStats {
   mttr_s: number;
 }
 
+/** A unified activity entry: either a service outage (incident) or a single
+ *  websocket connection drop. Powers the "Recent activity" feed. */
+export interface FleetEvent {
+  id: string;
+  kind: "incident" | "drop";
+  service: string; // service id
+  t: string; // ISO time (incident start, or when the drop happened)
+  cause: string; // incident: process_down/vm_silent; drop: "ws_drop"
+  duration_s?: number; // incident only
+  resolved?: boolean; // incident only
+  channel?: string; // drop only
+  conn?: string; // drop only
+}
+
 export interface IncidentsResponse {
   incidents: Incident[];
+  events: FleetEvent[]; // incidents + connection drops, newest first
   stats: Record<string, IncidentStats>;
 }
 

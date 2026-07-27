@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
-import { HardDrive, Zap, AlertCircle, Clock } from "lucide-react";
+import { HardDrive, Zap, AlertCircle, Clock, Activity } from "lucide-react";
 import { StatusPill } from "./StatusPill";
-import { fmtDuration } from "@/lib/streamer/format";
+import { fmtDuration, fmtNumber } from "@/lib/streamer/format";
 import type { ServiceSummary } from "@/lib/streamer/types";
 
 export function ServiceCard({ svc }: { svc: ServiceSummary }) {
@@ -25,6 +25,7 @@ export function ServiceCard({ svc }: { svc: ServiceSummary }) {
 
       <div className="mt-4 grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
         <Stat icon={Clock} label="Uptime" value={fmtDuration(svc.uptime_s)} />
+        <Stat icon={Activity} label="Msgs/s" value={fmtNumber(svc.msgs_per_s)} />
         <Stat
           icon={Zap}
           label="24h avail"
@@ -51,21 +52,33 @@ export function ServiceCard({ svc }: { svc: ServiceSummary }) {
         </div>
         <div className="flex h-6 items-end gap-[2px]">
           {svc.uptime_sparkline_24h.map((v, i) => (
-            <div
-              key={i}
-              className="flex-1 rounded-sm"
-              style={{
-                height: v ? "100%" : "35%",
-                background: v ? "var(--status-up)" : "var(--status-down)",
-                opacity: v ? 0.85 : 1,
-              }}
-              title={`bin ${i}: ${v ? "up" : "down"}`}
-            />
+            <div key={i} className="group/bin relative flex h-full flex-1 items-end">
+              <div
+                className="w-full rounded-sm"
+                style={{
+                  height: v ? "100%" : "35%",
+                  background: v ? "var(--status-up)" : "var(--status-down)",
+                  opacity: v ? 0.85 : 1,
+                }}
+              />
+              <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded border border-border bg-[--surface-3] px-1.5 py-0.5 text-[10px] font-mono text-foreground shadow-lg group-hover/bin:block">
+                {binLabel(i, svc.uptime_sparkline_24h.length)} · {v ? "up" : "down"}
+              </span>
+            </div>
           ))}
         </div>
       </div>
     </Link>
   );
+}
+
+/** Label for uptime-bar bin i (bins span 24h; the last bin is "now"). */
+function binLabel(i: number, bins: number): string {
+  const minsAgo = (bins - 1 - i) * (1440 / bins);
+  if (minsAgo <= 0) return "now";
+  const h = Math.floor(minsAgo / 60);
+  const m = Math.round(minsAgo % 60);
+  return h ? `${h}h${m ? ` ${m}m` : ""} ago` : `${m}m ago`;
 }
 
 function Stat({

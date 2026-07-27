@@ -14,6 +14,7 @@ import {
   type Channel,
   type ChannelStatus,
   type ConnectionRow,
+  type FleetEvent,
   type Incident,
   type IncidentsResponse,
   type OverviewResponse,
@@ -50,6 +51,11 @@ export interface ServiceState {
   connCounters: Record<string, number>;
   /** timestamped reconnect ("drop") events per channel — powers the status lines */
   dropEvents: DropEvent[];
+  /** last-seen {cumulative msgs, server-ms} per connection, for msgs/s rate */
+  msgCounters: Record<string, { msgs: number; t: number }>;
+  /** derived msgs/s per connection (latest interval) + the service total */
+  connRates: Record<string, number>;
+  msgsPerS: number;
 }
 
 interface DropEvent {
@@ -84,6 +90,9 @@ function createStore(): Store {
     svc.incidents ??= [];
     svc.connCounters ??= {};
     svc.dropEvents ??= [];
+    svc.msgCounters ??= {};
+    svc.connRates ??= {};
+    svc.msgsPerS ??= 0;
     s.services.set(svc.id, svc);
   }
   return s;
@@ -122,6 +131,9 @@ export function ingest(payload: IngestPayload): void {
         firstSeen: now,
         connCounters: {},
         dropEvents: [],
+        msgCounters: {},
+        connRates: {},
+        msgsPerS: 0,
       };
       store.services.set(snap.id, s);
     }
@@ -131,6 +143,7 @@ export function ingest(payload: IngestPayload): void {
     s.lastSnapshot = snap;
     s.lastIngestAt = now;
     recordDrops(s, snap, now); // turn reconnect-counter ticks into timestamped drop events
+    recordRates(s, snap, now); // diff msg counters → msgs/s per connection + service total
     evaluate(s, now); // fold this reading into status/incidents immediately
   }
   persist(); // durably save latest snapshots + any transitions (debounced)
@@ -164,6 +177,26 @@ function recordDrops(s: ServiceState, snap: IngestServiceSnapshot, now: number):
   if (s.dropEvents.length && s.dropEvents[0].t < cutoff) {
     s.dropEvents = s.dropEvents.filter((e) => e.t >= cutoff);
   }
+}
+
+/** Diff each connection's cumulative msg counter since the last push → msgs/s.
+ *  Sum across connections = the service's throughput. Counter resets (streamer
+ *  restart) or the first sighting yield 0 for that interval. */
+function recordRates(s: ServiceState, snap: IngestServiceSnapshot, now: number): void {
+  const rates: Record<string, number> = {};
+  let total = 0;
+  for (const c of snap.conn_stats ?? []) {
+    if (typeof c.msgs !== "number") continue;
+    const prev = s.msgCounters[c.name];
+    if (prev && c.msgs >= prev.msgs && now > prev.t) {
+      const rate = ((c.msgs - prev.msgs) * 1000) / (now - prev.t);
+      rates[c.name] = Math.round(rate);
+      total += rate;
+    }
+    s.msgCounters[c.name] = { msgs: c.msgs, t: now };
+  }
+  s.connRates = rates;
+  s.msgsPerS = Math.round(total);
 }
 
 function dropsInWindow(s: ServiceState, now: number, windowMs: number, channel?: Channel): number {
@@ -328,7 +361,6 @@ function symbolRows(snap: IngestServiceSnapshot | null): SymbolRow[] {
     return {
       symbol,
       staleness_s,
-      msgs_per_s: snap.msgs_per_s?.[symbol] ?? 0, // 0 in v1 (no counters yet)
       producing_files: Object.keys(staleness_s).length > 0,
     };
   });
@@ -351,8 +383,8 @@ function deriveConnections(s: ServiceState, now: number): ConnectionRow[] {
     state: connState(c.state),
     reconnects_1h: connDropsInWindow(s, now, 3600_000, c.name),
     reconnects_24h: connDropsInWindow(s, now, 24 * 3600_000, c.name),
+    msgs_per_s: s.connRates[c.name] ?? 0,
     last_connect: c.last_connect_ns ? new Date(c.last_connect_ns / 1e6).toISOString() : new Date(now).toISOString(),
-    skew_ms: 0, // not measured yet
   }));
 }
 
@@ -400,6 +432,7 @@ export function buildOverview(): OverviewResponse {
     uptime_pct_24h: uptimePct(s, now, 24 * 3600_000),
     uptime_s: uptimeSeconds(s, now),
     reconnects_1h: dropsInWindow(s, now, 3600_000), // real, from drop events
+    msgs_per_s: s.msgsPerS,
     disk_free_pct: s.lastSnapshot?.disk_free_pct ?? 0,
     stale_streams: staleStreams(s.lastSnapshot),
     uptime_sparkline_24h: sparkline24h(s, now),
@@ -413,7 +446,7 @@ export function buildOverview(): OverviewResponse {
     (a, s) => a + Object.keys(s.lastSnapshot?.symbols ?? {}).length,
     0,
   );
-  const msgs_per_s = [...store.services.values()].reduce((a, s) => a + serviceMsgsPerS(s), 0);
+  const msgs_per_s = [...store.services.values()].reduce((a, s) => a + s.msgsPerS, 0);
   const open_incidents = [...store.services.values()].reduce(
     (a, s) => a + s.incidents.filter((i) => !i.resolved).length,
     0,
@@ -438,6 +471,7 @@ export function buildServiceDetail(id: string): ServiceDetail | null {
     uptime_s: uptimeSeconds(s, now),
     restarts_24h: s.incidents.filter((i) => Date.parse(i.started) >= now - 24 * 3600_000).length,
     next_rollover_s: nextRolloverSeconds(now),
+    msgs_per_s: s.msgsPerS,
     channels: s.channels,
     symbols: symbolRows(s.lastSnapshot),
     connections: deriveConnections(s, now),
@@ -470,7 +504,38 @@ export function buildIncidents(windowDays: number): IncidentsResponse {
     };
   }
   incidents.sort((a, b) => Date.parse(b.started) - Date.parse(a.started));
-  return { incidents, stats };
+
+  // Unified activity feed: incidents (outages) + individual connection drops.
+  const events: FleetEvent[] = [];
+  for (const s of store.services.values()) {
+    for (const i of s.incidents) {
+      if (Date.parse(i.started) < from && i.resolved) continue;
+      events.push({
+        id: i.id,
+        kind: "incident",
+        service: i.service,
+        t: i.started,
+        cause: i.cause,
+        duration_s: i.resolved ? i.duration_s : Math.round((now - Date.parse(i.started)) / 1000),
+        resolved: i.resolved,
+      });
+    }
+    for (const d of s.dropEvents) {
+      if (d.t < from) continue;
+      events.push({
+        id: `drop_${s.id}_${d.conn}_${d.t}`,
+        kind: "drop",
+        service: s.id,
+        t: new Date(d.t).toISOString(),
+        cause: "ws_drop",
+        channel: d.channel,
+        conn: d.conn,
+      });
+    }
+  }
+  events.sort((a, b) => Date.parse(b.t) - Date.parse(a.t));
+
+  return { incidents, events: events.slice(0, 300), stats };
 }
 
 export function buildSymbols(): Array<
@@ -490,15 +555,6 @@ export function buildSymbols(): Array<
     }
   }
   return rows;
-}
-
-// ---- v2 placeholders (return 0/empty until the streamer stats op exists) ----
-function sumReconnects1h(s: ServiceState): number {
-  return (s.lastSnapshot?.connections ?? []).reduce((a, c) => a + (c.reconnects_1h ?? 0), 0);
-}
-function serviceMsgsPerS(s: ServiceState): number {
-  const m = s.lastSnapshot?.msgs_per_s;
-  return m ? Object.values(m).reduce((a, v) => a + v, 0) : 0;
 }
 
 function evaluateAll(now: number): void {

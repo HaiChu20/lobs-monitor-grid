@@ -18,6 +18,7 @@ export interface RawConnStat {
   state: string; // "connected" | "reconnecting" | "init"
   connects: number;
   reconnects: number; // cumulative, failure-driven (excludes midnight rotation)
+  msgs: number; // cumulative frames received (dashboard diffs → msgs/s)
   last_connect_ns: number;
 }
 

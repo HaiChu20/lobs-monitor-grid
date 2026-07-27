@@ -7,6 +7,7 @@ import { StatusPill } from "@/components/streamer/StatusPill";
 import { TimeAgo } from "@/components/streamer/TimeAgo";
 import { getOverview, getIncidents, POLL_MS } from "@/lib/streamer/api";
 import { fmtDuration, fmtNumber } from "@/lib/streamer/format";
+import type { FleetEvent } from "@/lib/streamer/types";
 import { ArrowRight } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -69,7 +70,7 @@ function OverviewPage() {
         </div>
 
         <Panel
-          title="Recent incidents · 24h"
+          title="Recent activity · 24h"
           right={
             <Link
               to="/incidents"
@@ -83,30 +84,41 @@ function OverviewPage() {
             loading={incidents.isLoading}
             error={incidents.error}
             onRetry={() => incidents.refetch()}
-            empty={incidents.data?.incidents.length === 0}
+            empty={incidents.data?.events.length === 0}
           >
             <div className="divide-y divide-border -m-4">
-              {incidents.data?.incidents.slice(0, 6).map((i) => (
-                <div
-                  key={i.id}
-                  className="flex items-center gap-4 px-4 py-2.5 text-sm hover:bg-[--surface-2]/60"
-                >
-                  <StatusPill status={i.resolved ? "UP" : "DOWN"} size="sm" />
-                  <span className="font-mono text-xs text-foreground w-40 truncate">{i.service}</span>
-                  <span className="text-xs text-muted-foreground font-mono w-20">
-                    {fmtDuration(i.duration_s)}
-                  </span>
-                  <span className="text-xs font-mono text-muted-foreground flex-1 truncate">
-                    {i.cause}
-                  </span>
-                  <TimeAgo iso={i.started} className="text-xs text-muted-foreground" />
-                </div>
+              {incidents.data?.events.slice(0, 8).map((e) => (
+                <EventRow key={e.id} e={e} />
               ))}
             </div>
           </StateBlock>
         </Panel>
       </div>
     </AppShell>
+  );
+}
+
+/** One row in the "Recent activity" feed — a service outage or a WS drop. */
+function EventRow({ e }: { e: FleetEvent }) {
+  const isDrop = e.kind === "drop";
+  return (
+    <div className="flex items-center gap-4 px-4 py-2.5 text-sm hover:bg-[--surface-2]/60">
+      {isDrop ? (
+        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-mono uppercase bg-[--status-degraded]/15 text-[--status-degraded]">
+          drop
+        </span>
+      ) : (
+        <StatusPill status={e.resolved ? "UP" : "DOWN"} size="sm" />
+      )}
+      <span className="font-mono text-xs text-foreground w-40 truncate">{e.service}</span>
+      <span className="text-xs text-muted-foreground font-mono w-24 truncate">
+        {isDrop ? e.channel : fmtDuration(e.duration_s ?? 0)}
+      </span>
+      <span className="text-xs font-mono text-muted-foreground flex-1 truncate">
+        {isDrop ? e.conn : e.cause}
+      </span>
+      <TimeAgo iso={e.t} className="text-xs text-muted-foreground" />
+    </div>
   );
 }
 

@@ -7,7 +7,7 @@ import { Panel, StateBlock } from "@/components/streamer/Panel";
 import { Gauge } from "@/components/streamer/Gauge";
 import { TimeAgo } from "@/components/streamer/TimeAgo";
 import { getServiceDetail, POLL_MS } from "@/lib/streamer/api";
-import { fmtDuration } from "@/lib/streamer/format";
+import { fmtDuration, fmtNumber } from "@/lib/streamer/format";
 import type { Channel, SymbolRow } from "@/lib/streamer/types";
 
 export const Route = createFileRoute("/services/$id")({
@@ -58,8 +58,9 @@ function ServiceDetailPage() {
                 <StatusPill status={q.data.status} size="lg" />
               </header>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-px rounded-lg overflow-hidden border border-border bg-border">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px rounded-lg overflow-hidden border border-border bg-border">
                 <HeaderStat label="Uptime" value={fmtDuration(q.data.uptime_s)} />
+                <HeaderStat label="Msgs/s" value={fmtNumber(q.data.msgs_per_s)} />
                 <HeaderStat label="Restarts 24h" value={String(q.data.restarts_24h)} />
                 <HeaderStat label="Next rollover" value={fmtDuration(q.data.next_rollover_s)} />
                 <HeaderStat label="Connections" value={String(q.data.connections.length)} />
@@ -90,12 +91,11 @@ function ServiceDetailPage() {
                         <div className="w-24 shrink-0 font-mono text-xs">{cs.channel}</div>
                         <div className="flex h-6 min-w-0 flex-1 items-stretch gap-[2px]">
                           {cs.buckets.map((b, i) => (
-                            <div
-                              key={i}
-                              className="flex-1 rounded-[1px]"
-                              style={{ background: b ? "var(--status-up)" : "var(--status-down)", opacity: b ? 0.8 : 1 }}
-                              title={`${binLabel(i)} · ${b ? "ok" : "drop"}`}
-                            />
+                            <div key={i} className="group/bin relative flex-1 rounded-[1px]" style={{ background: b ? "var(--status-up)" : "var(--status-down)", opacity: b ? 0.8 : 1 }}>
+                              <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded border border-border bg-[--surface-3] px-1.5 py-0.5 text-[10px] font-mono text-foreground shadow-lg group-hover/bin:block">
+                                {binLabel(i)} · {b ? "ok" : "drop"}
+                              </span>
+                            </div>
                           ))}
                         </div>
                         <div className="w-24 shrink-0 text-right font-mono text-[10px] text-muted-foreground">
@@ -132,7 +132,7 @@ function ServiceDetailPage() {
                           <Th right>Symbols</Th>
                           <Th>State</Th>
                           <Th right>Reconn 1h/24h</Th>
-                          <Th right>Skew ms</Th>
+                          <Th right>Msgs/s</Th>
                           <Th>Last connect</Th>
                         </tr>
                       </thead>
@@ -149,9 +149,7 @@ function ServiceDetailPage() {
                               </span>
                               <span className="text-muted-foreground"> / {c.reconnects_24h}</span>
                             </Td>
-                            <Td right mono>
-                              <span className={c.skew_ms > 150 ? "text-[--status-degraded]" : ""}>{c.skew_ms}</span>
-                            </Td>
+                            <Td right mono>{fmtNumber(c.msgs_per_s)}</Td>
                             <Td><TimeAgo iso={c.last_connect} className="text-muted-foreground" /></Td>
                           </tr>
                         ))}

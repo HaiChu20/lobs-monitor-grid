@@ -10,7 +10,6 @@
 
 import type { IngestPayload, IngestServiceSnapshot, RawConnStat } from "@/lib/streamer/ingest";
 import {
-  CHANNEL_THRESHOLDS,
   type Channel,
   type ChannelStatus,
   type ConnectionRow,
@@ -32,7 +31,7 @@ const DEAD_MS = 20_000;
 /** How long to keep incident history (memory + disk). Default 90 days. */
 const RETENTION_MS = (Number(process.env.RETENTION_DAYS) || 90) * 24 * 3600_000;
 
-type Cause = "vm_silent" | "process_down" | "stale_streams";
+type Cause = "vm_silent" | "process_down";
 
 export interface ServiceState {
   id: string;
@@ -231,23 +230,10 @@ function healthStatus(snap: IngestServiceSnapshot, reconnects1h: number): Status
   return "UP";
 }
 
-/** Count of (symbol,channel) past their warn threshold — INFO only now (not health). */
-function countStale(snap: IngestServiceSnapshot): number {
-  let stale = 0;
-  for (const chans of Object.values(snap.symbols ?? {})) {
-    for (const [ch, v] of Object.entries(chans) as [Channel, number | null][]) {
-      if (v == null) continue;
-      const t = CHANNEL_THRESHOLDS[ch];
-      if (t && v > t.warn) stale++;
-    }
-  }
-  return stale;
-}
-
 /** Recompute a service's status at time `now`, recording transitions + incidents. */
 function evaluate(s: ServiceState, now: number): void {
   let status: Status;
-  let cause: Cause = "stale_streams";
+  let cause: Cause = "process_down";
   if (now - s.lastIngestAt > DEAD_MS) {
     status = "DOWN";
     cause = "vm_silent";
@@ -338,11 +324,6 @@ function sparkline24h(s: ServiceState, now: number): number[] {
     }
     return 1;
   });
-}
-
-function staleStreams(snap: IngestServiceSnapshot | null): number {
-  if (!snap) return 0;
-  return countStale(snap); // informational only; no longer affects status
 }
 
 function nextRolloverSeconds(now: number): number {
@@ -437,7 +418,6 @@ export function buildOverview(windowMs = 24 * 3600_000): OverviewResponse {
     drops_24h: dropsInWindow(s, now, 24 * 3600_000),
     msgs_per_s: s.msgsPerS,
     disk_free_pct: s.lastSnapshot?.disk_free_pct ?? 0,
-    stale_streams: staleStreams(s.lastSnapshot),
     uptime_sparkline_24h: sparkline24h(s, now),
     channel_status: deriveChannelStatus(s, now, windowMs),
   }));
@@ -481,7 +461,6 @@ export function buildServiceDetail(id: string, windowMs = 24 * 3600_000): Servic
     connections: deriveConnections(s, now),
     channel_status: deriveChannelStatus(s, now, windowMs),
     budgets: s.lastSnapshot?.budgets ?? [],
-    series: { msgs_per_s_1h: [], reconnects_24h: [], skew_ms_1h: [] }, // filled later
   };
 }
 

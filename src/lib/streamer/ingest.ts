@@ -6,7 +6,7 @@
 // server — see src/server/store.ts. Keeping this shape close to the raw `list`
 // output means the real agent (Phase 2) stays a ~15-line script.
 
-import type { BudgetItem, Channel, ConnectionRow } from "./types";
+import type { BudgetItem, Channel } from "./types";
 
 /** Raw per-connection counters from the streamer `stats` op (cumulative since
  *  start). The dashboard diffs these over time to derive reconnect rates + the
@@ -33,7 +33,7 @@ export interface IngestServiceSnapshot {
   active: boolean;
   /** disk free % on the data volume (from `df`) */
   disk_free_pct?: number;
-  /** channels this service runs — becomes the heatmap columns */
+  /** channels this service runs */
   channels?: Channel[];
   /** exchange-specific rate-limit budgets (connect-open, REST weight, L3 pacer …) */
   budgets?: BudgetItem[];
@@ -44,13 +44,9 @@ export interface IngestServiceSnapshot {
    */
   symbols: Record<string, Partial<Record<Channel, number | null>>>;
 
-  // ---- per-connection reliability (from the streamer `stats` op) ----
-  /** raw cumulative counters per socket — the dashboard derives rates + timeline */
+  /** raw per-connection counters from the streamer `stats` op — the dashboard
+   *  derives reconnect rates, msgs/s, and the per-channel status timeline. */
   conn_stats?: RawConnStat[];
-  /** (legacy/unused) pre-derived rows */
-  connections?: ConnectionRow[];
-  /** per-symbol message rate, e.g. { "BTCUSDT": 320 } */
-  msgs_per_s?: Record<string, number>;
 }
 
 /** One POST from one VM's agent. A VM may host several services. */

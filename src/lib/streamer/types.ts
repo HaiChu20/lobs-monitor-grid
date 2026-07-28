@@ -1,13 +1,8 @@
 export type Status = "UP" | "DEGRADED" | "DOWN";
 
-export type Channel =
-  | "depth"
-  | "bookTicker"
-  | "trade"
-  | "aggTrade"
-  | "markPrice"
-  | "forceOrder"
-  | "snapshot";
+// Channel names vary by exchange (Binance depth/bookTicker…, Kraken book/level3,
+// OKX books/trades…), so this is just a label.
+export type Channel = string;
 
 export interface FleetSummary {
   up: number;
@@ -30,7 +25,6 @@ export interface ServiceSummary {
   drops_24h: number;
   msgs_per_s: number;
   disk_free_pct: number;
-  stale_streams: number;
   uptime_sparkline_24h: number[]; // 48 bins, 1 up / 0 down
   channel_status: ChannelStatus[]; // per-channel drop lines, shown on the landing page
 }
@@ -69,12 +63,6 @@ export interface BudgetItem {
   unit?: string;
 }
 
-export interface Series {
-  msgs_per_s_1h: [number, number][];
-  reconnects_24h: [number, number][];
-  skew_ms_1h: [number, number][];
-}
-
 /** One status-page "line": a channel's drop history, bucketed over the selected
  *  timeframe. Each bin holds the NUMBER of drops in it (0 = clean). */
 export interface ChannelStatus {
@@ -99,7 +87,6 @@ export interface ServiceDetail {
   connections: ConnectionRow[];
   channel_status: ChannelStatus[];
   budgets: BudgetItem[];
-  series: Series;
 }
 
 export interface Incident {
@@ -141,22 +128,3 @@ export interface IncidentsResponse {
   stats: Record<string, IncidentStats>;
 }
 
-export const CHANNEL_THRESHOLDS: Record<Channel, { warn: number; crit: number }> = {
-  depth: { warn: 2, crit: 5 },
-  bookTicker: { warn: 2, crit: 5 },
-  trade: { warn: 10, crit: 60 },
-  aggTrade: { warn: 10, crit: 60 },
-  markPrice: { warn: 3, crit: 10 },
-  forceOrder: { warn: 120, crit: 600 },
-  snapshot: { warn: 400, crit: 900 },
-};
-
-export const ALL_CHANNELS: Channel[] = [
-  "depth",
-  "bookTicker",
-  "trade",
-  "aggTrade",
-  "markPrice",
-  "forceOrder",
-  "snapshot",
-];
